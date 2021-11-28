@@ -1,0 +1,41 @@
+{{- if .Values.persistence.scheduledSnapshots -}}
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: {{ include "grocy.fullname" . }}
+  labels:
+    {{- include "grocy.labels" . | nindent 4 }}
+spec:
+  schedule: "15 15 * * *"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "grocy.labels" . | nindent 12 }}
+        spec:
+          serviceAccountName: {{ include "grocy.serviceAccountName" . }}
+          containers:
+          - name: snapshot
+            image: "bitnami/kubectl:{{- .Capabilities.KubeVersion.Major -}}.{{- .Capabilities.KubeVersion.Minor -}}"
+            command:  ["/opt/bitnami/kubectl/bin/kubectl"]
+            args:
+              - "apply"
+              - "-n={{- .Release.Namespace -}}"
+              - "-f/home/snapshot-public.yaml"
+              - "-f/home/snapshot-data.yaml"
+            volumeMounts:
+              - mountPath: /home/snapshot-public.yaml
+                name: config
+                subPath: snapshot-public.yaml
+                readOnly: true
+              - mountPath: /home/snapshot-data.yaml
+                name: config
+                subPath: snapshot-data.yaml
+                readOnly: true
+          restartPolicy: OnFailure
+          volumes:    
+            - name: config
+              configMap:
+                name: {{ include "grocy.fullname" . }}-scheduled-snapshots
+{{- end -}}

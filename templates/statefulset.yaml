@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "grocy.fullname" . }}
+  labels:
+    {{- include "grocy.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "grocy.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "grocy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "grocy.selectorLabels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      serviceAccountName: {{ include "grocy.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames:
+            - "grocy"
+      initContainers:
+        - name: copy-static
+          image: "{{ .Values.image.repository }}:{{ .Values.grocyVersion }}"
+          command: ["sh", "-c", "cp -rp /www/public/* /www/public_target/"]      
+          volumeMounts:
+            - name: {{ include "grocy.fullname" . }}-public
+              mountPath: /www/public_target
+        - name: init-data
+          image: "{{ .Values.image.repository }}:{{ .Values.grocyVersion }}"
+          command: ["sh", "-c", "false | cp -irp /www/data/* /www/data_target/ 2>/dev/null"]      
+          volumeMounts:
+            - name: {{ include "grocy.fullname" . }}-data
+              mountPath: /www/data_target
+      containers:
+        - name:  {{ .Chart.Name }}-nginx
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.nginxVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+          - name: http
+            containerPort: 80
+            protocol: TCP
+          livenessProbe: 
+            httpGet:
+              path: /
+              port: http 
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{ if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: {{ include "grocy.fullname" . }}-data
+              mountPath: /www/data
+            - name: {{ include "grocy.fullname" . }}-public
+              mountPath: /www/public
+          {{ end }}       
+        - name: {{ .Chart.Name }}-grocy
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.grocyVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+          {{- range $variable, $value := .Values.grocy }}
+            - name: GROCY_{{ $variable | upper }}
+              value: {{ $value | quote }}
+          {{ end }}
+          ports:
+            - name: fpm
+              containerPort: 9000
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: fpm
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: fpm
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{ if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: {{ include "grocy.fullname" . }}-data
+              mountPath: /www/data
+            - name: {{ include "grocy.fullname" . }}-public
+              mountPath: /www/public
+          {{ end }}       
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  {{ if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+  - metadata:
+      name: {{ include "grocy.fullname" . }}-data
+    spec:
+      accessModes: 
+      {{- range .Values.persistence.accessMode }}
+        - {{ . | quote }}
+      {{ end }}
+      {{ if .Values.persistence.storageClass }}
+      storageClassName: {{ quote .Values.persistence.storageClass }}
+      {{ end }}
+      resources:
+        requests:
+          storage: {{ quote .Values.persistence.dataSize }}
+  - metadata:
+      name: {{ include "grocy.fullname" . }}-public
+    spec:
+      accessModes: 
+      {{- range .Values.persistence.accessMode }}
+        - {{ . | quote }}
+      {{ end }}
+      {{ if .Values.persistence.storageClass }}
+      storageClassName: {{ quote .Values.persistence.storageClass }}
+      {{ end }}
+      resources:
+        requests:
+          storage: {{ quote .Values.persistence.publicSize }}
+      {{ end }}

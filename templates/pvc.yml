@@ -1,0 +1,29 @@
+{{ if .Values.persistence.enabled }}
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ include "grocy.fullname" . }}-public
+  labels:
+    {{- include "grocy.labels" . | nindent 4 }}
+spec:
+  accessModes: 
+  {{- range .Values.persistence.accessMode }}
+    - {{ . | quote }}
+  {{ end }}
+  resources:
+    requests:
+      storage: {{ quote .Values.persistence.publicSize }}
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ include "grocy.fullname" . }}-data
+spec:
+  accessModes: 
+  {{- range .Values.persistence.accessMode }}
+    - {{ . | quote }}
+  {{ end }}
+  resources:
+    requests:
+      storage: {{ quote .Values.persistence.dataSize }}
+{{ end }}
